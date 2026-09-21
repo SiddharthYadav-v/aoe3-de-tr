@@ -7,6 +7,9 @@ import {
   Check,
   Cloud,
   CloudOff,
+  Edit3,
+  Eye,
+  LogIn,
   LogOut,
   Menu,
   Search,
@@ -19,19 +22,24 @@ import { CivilizationProfile } from './components/CivilizationProfile'
 import { MatchupPage } from './components/MatchupPage'
 import { civilizations as seededCivilizations } from './data/civilizations'
 import {
+  createDeck,
+  deleteDeck,
+  deleteDeckImage,
   getSession,
   isCloudConfigured,
+  isCurrentUserGuideAdmin,
   loadCivilizations,
-  loadCloudGuides,
-  saveCloudGuide,
+  loadPublicGuides,
+  saveCivilization,
+  saveDeck,
+  savePublicGuide,
   signInWithDiscord,
   signOut,
   supabase,
+  uploadDeckImage,
 } from './lib/supabase'
-import type { GuideField, MatchupGuide } from './types'
+import type { Civilization, DeckPreset, GuideField, MatchupGuide } from './types'
 import './styles.css'
-
-const STORAGE_KEY = 'aoe3-field-notes-v2'
 
 function guideKey(civilizationId: string, opponentId: string) {
   return `${civilizationId}__${opponentId}`
@@ -52,27 +60,21 @@ function emptyGuide(civilizationId: string, opponentId: string): MatchupGuide {
   }
 }
 
-function readLocalGuides(): Record<string, MatchupGuide> {
-  try {
-    return JSON.parse(localStorage.getItem(STORAGE_KEY) ?? '{}')
-  } catch {
-    return {}
-  }
-}
+type SaveState = 'public' | 'loading' | 'saving' | 'saved' | 'error'
 
 function RoutedApp() {
   const navigate = useNavigate()
   const location = useLocation()
   const [civilizations, setCivilizations] = useState(seededCivilizations)
+  const [guides, setGuides] = useState<Record<string, MatchupGuide>>({})
   const [query, setQuery] = useState('')
   const [region, setRegion] = useState('All')
   const [sidebarOpen, setSidebarOpen] = useState(false)
-  const [guides, setGuides] = useState<Record<string, MatchupGuide>>(readLocalGuides)
-  const [pendingGuide, setPendingGuide] = useState<MatchupGuide | null>(null)
   const [session, setSession] = useState<Session | null>(null)
-  const [saveState, setSaveState] = useState<'saved' | 'saving' | 'local' | 'error'>(
-    isCloudConfigured ? 'saved' : 'local',
-  )
+  const [isAdmin, setIsAdmin] = useState(false)
+  const [editMode, setEditMode] = useState(false)
+  const [saveState, setSaveState] = useState<SaveState>(isCloudConfigured ? 'loading' : 'public')
+  const [notice, setNotice] = useState('')
 
   const matchupRoute = matchPath(
     { path: '/civilizations/:civilizationId/matchups/:opponentId', end: true },
@@ -94,6 +96,7 @@ function RoutedApp() {
   const guide = active && selectedOpponent
     ? guides[key] ?? emptyGuide(active.id, selectedOpponent.id)
     : null
+  const editable = Boolean(session && isAdmin && editMode)
 
   const filteredCivilizations = useMemo(() => {
     const normalized = query.trim().toLowerCase()
@@ -106,79 +109,79 @@ function RoutedApp() {
     )
   }, [civilizations, query, region])
 
-  const completedCount = useMemo(
+  const publishedCount = useMemo(
     () =>
       Object.values(guides).filter((item) =>
-        [item.gamePlan, item.opening, item.keyUnits, item.timings, item.threats].every(
-          (value) => value.trim().length > 0,
-        ),
+        [item.overview, item.gamePlan, item.opening, item.keyUnits, item.timings, item.threats, item.notes]
+          .some((value) => value.trim()),
       ).length,
     [guides],
   )
 
   useEffect(() => {
     if (!isCloudConfigured) return
-    void loadCivilizations()
-      .then((items) => {
-        if (items.length) setCivilizations(items)
+    let cancelled = false
+    setSaveState('loading')
+    void Promise.all([loadCivilizations(), loadPublicGuides()])
+      .then(([loadedCivilizations, loadedGuides]) => {
+        if (cancelled) return
+        if (loadedCivilizations.length) setCivilizations(loadedCivilizations)
+        setGuides(Object.fromEntries(
+          loadedGuides.map((item) => [guideKey(item.civilizationId, item.opponentId), item]),
+        ))
+        setSaveState('public')
       })
       .catch(() => {
-        // Bundled reference data remains available when cloud metadata is offline.
+        if (!cancelled) {
+          setSaveState('error')
+          setNotice('The cloud guide could not be loaded. Showing bundled reference content.')
+        }
       })
-  }, [])
-
-  useEffect(() => {
-    void getSession().then(setSession)
-    if (!supabase) return
-    const { data } = supabase.auth.onAuthStateChange((_event, nextSession) => {
-      setSession(nextSession)
-    })
-    return () => data.subscription.unsubscribe()
-  }, [])
-
-  useEffect(() => {
-    if (!session) return
-    let cancelled = false
-    void loadCloudGuides()
-      .then((cloudGuides) => {
-        if (cancelled) return
-        setGuides((current) => {
-          const merged = { ...current }
-          cloudGuides.forEach((item) => {
-            merged[guideKey(item.civilizationId, item.opponentId)] = item
-          })
-          localStorage.setItem(STORAGE_KEY, JSON.stringify(merged))
-          return merged
-        })
-        setSaveState('saved')
-      })
-      .catch(() => setSaveState('error'))
     return () => {
       cancelled = true
     }
-  }, [session])
+  }, [])
 
   useEffect(() => {
-    if (!pendingGuide) return
-    setSaveState(session ? 'saving' : 'local')
-    const timer = window.setTimeout(() => {
-      if (!session) {
-        setPendingGuide(null)
+    let cancelled = false
+    const applySession = async (nextSession: Session | null) => {
+      if (cancelled) return
+      setSession(nextSession)
+      setEditMode(false)
+      if (!nextSession) {
+        setIsAdmin(false)
         return
       }
-      void saveCloudGuide(pendingGuide)
-        .then((saved) => {
-          setGuides((current) => ({
-            ...current,
-            [guideKey(saved.civilizationId, saved.opponentId)]: saved,
-          }))
-          setSaveState('saved')
-          setPendingGuide(null)
-        })
-        .catch(() => setSaveState('error'))
-    }, 650)
+      try {
+        const allowed = await isCurrentUserGuideAdmin()
+        if (!cancelled) {
+          setIsAdmin(allowed)
+          if (!allowed) setNotice('This Discord account has viewer access only.')
+        }
+      } catch {
+        if (!cancelled) {
+          setIsAdmin(false)
+          setNotice('Admin access could not be verified.')
+        }
+      }
+    }
+
+    void getSession().then(applySession)
+    if (!supabase) return
+    const { data } = supabase.auth.onAuthStateChange((_event, nextSession) => {
+      void applySession(nextSession)
+    })
+    return () => {
+      cancelled = true
+      data.subscription.unsubscribe()
+    }
+  }, [])
+
+  useEffect(() => {
+    if (!notice) return
+    const timer = window.setTimeout(() => setNotice(''), 3500)
     return () => window.clearTimeout(timer)
-  }, [pendingGuide, session])
+  }, [notice])
 
   if (!activeId) {
     return <Navigate to="/civilizations/british" replace />
@@ -196,7 +199,30 @@ function RoutedApp() {
   }
 
   const regions = ['All', ...new Set(civilizations.map((item) => item.region))]
+  const currentCivilization: Civilization = active
   const defaultOpponent = civilizations.find((item) => item.id !== active.id)!
+
+  function updateCivilizationInState(updated: Civilization) {
+    setCivilizations((current) =>
+      current.map((item) => item.id === updated.id ? updated : item),
+    )
+  }
+
+  function updateDeckInState(civilizationId: string, updatedDeck: DeckPreset) {
+    setCivilizations((current) => current.map((civilization) =>
+      civilization.id === civilizationId
+        ? {
+            ...civilization,
+            profile: {
+              ...civilization.profile,
+              decks: civilization.profile.decks.map((deck) =>
+                deck.id === updatedDeck.id ? updatedDeck : deck,
+              ),
+            },
+          }
+        : civilization,
+    ))
+  }
 
   function selectCivilization(id: string) {
     if (isMatchup) {
@@ -211,12 +237,11 @@ function RoutedApp() {
   }
 
   function updateGuide(field: GuideField, value: string) {
-    if (!guide || !key) return
-    const updated = { ...guide, [field]: value, updatedAt: new Date().toISOString() }
-    const next = { ...guides, [key]: updated }
-    setGuides(next)
-    setPendingGuide(updated)
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(next))
+    if (!guide || !key || !editable) return
+    setGuides((current) => ({
+      ...current,
+      [key]: { ...guide, [field]: value, updatedAt: new Date().toISOString() },
+    }))
   }
 
   function stepCivilization(direction: number) {
@@ -230,18 +255,122 @@ function RoutedApp() {
       await signInWithDiscord()
     } catch {
       setSaveState('error')
+      setNotice('Discord sign-in could not be started.')
     }
   }
 
-  const activeHasNotes = (civilizationId: string) =>
+  async function runAdminAction(action: () => Promise<void>, successMessage: string) {
+    if (!editable) return
+    setSaveState('saving')
+    try {
+      await action()
+      setSaveState('saved')
+      setNotice(successMessage)
+      window.setTimeout(() => setSaveState('public'), 1200)
+    } catch (error) {
+      console.error(error)
+      setSaveState('error')
+      setNotice(error instanceof Error ? error.message : 'The change could not be saved.')
+    }
+  }
+
+  function handleSaveGuide() {
+    if (!guide || !key) return
+    void runAdminAction(async () => {
+      const saved = await savePublicGuide(guide)
+      setGuides((current) => ({ ...current, [key]: saved }))
+    }, 'Matchup guide published.')
+  }
+
+  function handleSaveCivilization() {
+    void runAdminAction(
+      () => saveCivilization(currentCivilization),
+      `${currentCivilization.name} profile published.`,
+    )
+  }
+
+  function handleCreateDeck() {
+    void runAdminAction(async () => {
+      const deck = await createDeck(currentCivilization.id, 'Untitled deck')
+      updateCivilizationInState({
+        ...currentCivilization,
+        profile: {
+          ...currentCivilization.profile,
+          decks: [...currentCivilization.profile.decks, deck],
+        },
+      })
+    }, 'New deck added.')
+  }
+
+  function handleSaveDeck(deck: DeckPreset) {
+    void runAdminAction(() => saveDeck(deck), 'Deck published.')
+  }
+
+  function handleDeleteDeck(deck: DeckPreset) {
+    if (!confirm(`Delete “${deck.title}”? This also removes its uploaded screenshot.`)) return
+    void runAdminAction(async () => {
+      await deleteDeck(deck)
+      updateCivilizationInState({
+        ...currentCivilization,
+        profile: {
+          ...currentCivilization.profile,
+          decks: currentCivilization.profile.decks.filter((item) => item.id !== deck.id),
+        },
+      })
+    }, 'Deck deleted.')
+  }
+
+  function handleDeckImageUpload(deck: DeckPreset, file: File) {
+    if (!['image/jpeg', 'image/png', 'image/webp'].includes(file.type)) {
+      setNotice('Use a JPG, PNG, or WebP image.')
+      return
+    }
+    if (file.size > 10 * 1024 * 1024) {
+      setNotice('Deck screenshots must be smaller than 10 MB.')
+      return
+    }
+    void runAdminAction(async () => {
+      const oldPath = deck.storagePath
+      const uploaded = await uploadDeckImage(currentCivilization.id, file)
+      const updated = {
+        ...deck,
+        imagePath: uploaded.publicUrl,
+        storagePath: uploaded.path,
+      }
+      try {
+        await saveDeck(updated)
+      } catch (error) {
+        await deleteDeckImage(uploaded.path)
+        throw error
+      }
+      updateDeckInState(currentCivilization.id, updated)
+      if (oldPath) await deleteDeckImage(oldPath)
+    }, 'Deck screenshot uploaded.')
+  }
+
+  function handleMoveDeck(deck: DeckPreset, direction: number) {
+    const decks = [...currentCivilization.profile.decks]
+    const index = decks.findIndex((item) => item.id === deck.id)
+    const target = index + direction
+    if (index < 0 || target < 0 || target >= decks.length) return
+    ;[decks[index], decks[target]] = [decks[target], decks[index]]
+    const reordered = decks.map((item, order) => ({ ...item, sortOrder: order + 1 }))
+    updateCivilizationInState({
+      ...currentCivilization,
+      profile: { ...currentCivilization.profile, decks: reordered },
+    })
+    void runAdminAction(
+      () => Promise.all(reordered.map((item) => saveDeck(item))).then(() => undefined),
+      'Deck order updated.',
+    )
+  }
+
+  const hasPublishedNotes = (civilizationId: string) =>
     Object.values(guides).some(
       (item) =>
         item.civilizationId === civilizationId &&
-        Object.entries(item).some(
-          ([field, value]) =>
-            !['civilizationId', 'opponentId', 'updatedAt', 'id'].includes(field) &&
-            String(value).trim(),
-        ),
+        [item.overview, item.gamePlan, item.opening, item.keyUnits, item.timings, item.threats, item.notes]
+          .some((value) => value.trim()),
     )
 
   return (
@@ -263,8 +392,8 @@ function RoutedApp() {
         </div>
 
         <div className="library-heading">
-          <span>Civilizations</span>
-          <small>{completedCount} matchups complete</small>
+          <span>Public guide</span>
+          <small>{publishedCount} matchups published</small>
         </div>
 
         <label className="search-box">
@@ -290,7 +419,7 @@ function RoutedApp() {
             >
               <img className="civ-flag" src={item.flagPath} alt="" />
               <span className="civ-meta"><strong>{item.name}</strong><small>{item.region}</small></span>
-              {activeHasNotes(item.id) && <span className="note-indicator" title="Has field notes" />}
+              {hasPublishedNotes(item.id) && <span className="note-indicator" title="Has published matchups" />}
             </button>
           ))}
           {!filteredCivilizations.length && <p className="empty-list">No civilizations match that search.</p>}
@@ -298,16 +427,19 @@ function RoutedApp() {
 
         <div className="sidebar-footer">
           {!isCloudConfigured ? (
-            <div className="setup-note"><CloudOff size={16} /><span>Add Supabase keys to enable cloud sync.</span></div>
+            <div className="setup-note"><CloudOff size={16} /><span>Add Supabase keys to load the public guide.</span></div>
           ) : session ? (
             <div className="account">
               <img src={session.user.user_metadata.avatar_url} alt="" />
-              <span><strong>{session.user.user_metadata.full_name ?? 'Commander'}</strong><small>Synced to cloud</small></span>
+              <span>
+                <strong>{session.user.user_metadata.full_name ?? 'Commander'}</strong>
+                <small>{isAdmin ? 'Guide administrator' : 'Viewer access'}</small>
+              </span>
               <button className="icon-button" onClick={() => void signOut()} title="Sign out"><LogOut size={16} /></button>
             </div>
           ) : (
-            <button className="discord-button" onClick={() => void handleDiscordLogin()}>
-              <Cloud size={17} /> Continue with Discord
+            <button className="discord-button admin-login" onClick={() => void handleDiscordLogin()}>
+              <LogIn size={17} /> Admin sign in
             </button>
           )}
         </div>
@@ -321,9 +453,29 @@ function RoutedApp() {
             <Link to={`/civilizations/${active.id}`}>{active.name}</Link>
             {isMatchup && <><b>/</b><strong>{selectedOpponent?.name} matchup</strong></>}
           </div>
+          {isAdmin && (
+            <button
+              className={`edit-mode-button ${editMode ? 'active' : ''}`}
+              type="button"
+              onClick={() => setEditMode((current) => !current)}
+            >
+              {editMode ? <Eye size={14} /> : <Edit3 size={14} />}
+              {editMode ? 'Preview' : 'Edit guide'}
+            </button>
+          )}
           <div className={`save-state ${saveState}`}>
-            {saveState === 'saving' ? <Cloud size={15} /> : saveState === 'error' ? <CloudOff size={15} /> : <Check size={15} />}
-            <span>{saveState === 'saving' ? 'Saving' : saveState === 'error' ? 'Sync failed' : saveState === 'local' ? 'Saved locally' : 'Cloud synced'}</span>
+            {saveState === 'saving' || saveState === 'loading'
+              ? <Cloud size={15} />
+              : saveState === 'error'
+                ? <CloudOff size={15} />
+                : <Check size={15} />}
+            <span>
+              {saveState === 'loading' ? 'Loading guide'
+                : saveState === 'saving' ? 'Publishing'
+                  : saveState === 'error' ? 'Cloud unavailable'
+                    : saveState === 'saved' ? 'Published'
+                      : 'Public guide'}
+            </span>
           </div>
         </header>
 
@@ -364,19 +516,35 @@ function RoutedApp() {
               opponent={selectedOpponent}
               civilizations={civilizations}
               guide={guide}
+              editable={editable}
+              saving={saveState === 'saving'}
               onOpponentChange={(id) => navigate(`/civilizations/${active.id}/matchups/${id}`)}
               onGuideChange={updateGuide}
+              onSave={handleSaveGuide}
             />
           ) : (
-            <CivilizationProfile civilization={active} />
+            <CivilizationProfile
+              civilization={active}
+              editable={editable}
+              saving={saveState === 'saving'}
+              onCivilizationChange={updateCivilizationInState}
+              onSave={handleSaveCivilization}
+              onDeckChange={(deck) => updateDeckInState(active.id, deck)}
+              onDeckSave={handleSaveDeck}
+              onDeckCreate={handleCreateDeck}
+              onDeckDelete={handleDeleteDeck}
+              onDeckImageUpload={handleDeckImageUpload}
+              onDeckMove={handleMoveDeck}
+            />
           )}
 
           <footer className="page-footer">
             <span>Field Notes</span>
-            <p>{isMatchup ? 'Every pairing is an independent living guide.' : 'Know the civilization before reading the battlefield.'}</p>
+            <p>{isMatchup ? 'One curated strategy guide, shared with every visitor.' : 'Know the civilization before reading the battlefield.'}</p>
           </footer>
         </div>
       </main>
+      {notice && <div className="app-notice" role="status">{notice}</div>}
     </div>
   )
 }

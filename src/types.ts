@@ -7,9 +7,12 @@ export type Region =
 
 export interface DeckPreset {
   id: string
+  slug: string
   title: string
   description: string
   imagePath: string | null
+  storagePath: string | null
+  sortOrder: number
 }
 
 export interface CivilizationProfile {

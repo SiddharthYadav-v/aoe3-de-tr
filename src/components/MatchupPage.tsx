@@ -1,4 +1,4 @@
-import { ChevronDown, Sparkles, Swords } from 'lucide-react'
+import { Check, ChevronDown, Edit3, Sparkles, Swords } from 'lucide-react'
 import type { Civilization, GuideField, MatchupGuide } from '../types'
 
 const fieldGroups: Array<{
@@ -21,8 +21,11 @@ interface MatchupPageProps {
   opponent: Civilization
   civilizations: Civilization[]
   guide: MatchupGuide
+  editable: boolean
+  saving: boolean
   onOpponentChange: (id: string) => void
   onGuideChange: (field: GuideField, value: string) => void
+  onSave: () => void
 }
 
 export function MatchupPage({
@@ -30,19 +33,34 @@ export function MatchupPage({
   opponent,
   civilizations,
   guide,
+  editable,
+  saving,
   onOpponentChange,
   onGuideChange,
+  onSave,
 }: MatchupPageProps) {
+  const hasPublishedContent = [
+    guide.overview,
+    ...fieldGroups.map((field) => guide[field.id]),
+  ].some((value) => value.trim())
+
   return (
-    <div className="matchup-page">
-      <section className="identity-card">
-        <div><Sparkles size={18} /><span><strong>Matchup read</strong><small>Specific to this pairing</small></span></div>
-        <textarea
-          value={guide.overview}
-          onChange={(event) => onGuideChange('overview', event.target.value)}
-          placeholder={`How should ${civilization.name} approach ${opponent.name}?`}
-        />
-      </section>
+    <div className={`matchup-page ${editable ? 'editing' : ''}`}>
+      {editable ? (
+        <section className="identity-card">
+          <div><Sparkles size={18} /><span><strong>Matchup read</strong><small>Specific to this pairing</small></span></div>
+          <textarea
+            value={guide.overview}
+            onChange={(event) => onGuideChange('overview', event.target.value)}
+            placeholder={`How should ${civilization.name} approach ${opponent.name}?`}
+          />
+        </section>
+      ) : guide.overview ? (
+        <section className="published-overview">
+          <Sparkles size={18} />
+          <div><span>Matchup read</span><p>{guide.overview}</p></div>
+        </section>
+      ) : null}
 
       <section className="matchup-card">
         <header className="matchup-header">
@@ -66,19 +84,47 @@ export function MatchupPage({
           </label>
         </header>
 
-        <div className="guide-grid">
-          {fieldGroups.map((field, index) => (
-            <label className={`guide-field ${field.wide ? 'wide' : ''}`} key={field.id}>
-              <span className="field-number">{String(index + 1).padStart(2, '0')}</span>
-              <span className="field-title"><strong>{field.label}</strong><small>{field.hint}</small></span>
-              <textarea
-                value={guide[field.id]}
-                onChange={(event) => onGuideChange(field.id, event.target.value)}
-                placeholder={field.placeholder}
-              />
-            </label>
-          ))}
-        </div>
+        {editable ? (
+          <>
+            <div className="guide-grid">
+              {fieldGroups.map((field, index) => (
+                <label className={`guide-field ${field.wide ? 'wide' : ''}`} key={field.id}>
+                  <span className="field-number">{String(index + 1).padStart(2, '0')}</span>
+                  <span className="field-title"><strong>{field.label}</strong><small>{field.hint}</small></span>
+                  <textarea
+                    value={guide[field.id]}
+                    onChange={(event) => onGuideChange(field.id, event.target.value)}
+                    placeholder={field.placeholder}
+                  />
+                </label>
+              ))}
+            </div>
+            <div className="editor-actions">
+              <span><Edit3 size={14} /> Publishing one shared guide for every viewer</span>
+              <button className="primary-action" type="button" onClick={onSave} disabled={saving}>
+                <Check size={15} /> {saving ? 'Saving…' : 'Publish matchup'}
+              </button>
+            </div>
+          </>
+        ) : hasPublishedContent ? (
+          <div className="published-guide-grid">
+            {fieldGroups.map((field, index) => guide[field.id].trim() && (
+              <article className={field.wide ? 'wide' : ''} key={field.id}>
+                <span className="field-number">{String(index + 1).padStart(2, '0')}</span>
+                <div>
+                  <span className="field-title"><strong>{field.label}</strong><small>{field.hint}</small></span>
+                  <p>{guide[field.id]}</p>
+                </div>
+              </article>
+            ))}
+          </div>
+        ) : (
+          <div className="guide-empty">
+            <Swords size={25} />
+            <strong>This matchup guide is being prepared.</strong>
+            <p>Choose another opponent or check back after the next strategy update.</p>
+          </div>
+        )}
       </section>
     </div>
   )

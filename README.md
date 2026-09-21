@@ -1,6 +1,8 @@
 # AoE III DE Field Notes
 
-A local-first matchup notebook for **Age of Empires III: Definitive Edition**, rebuilt as a React and TypeScript application. Each civilization pairing has an independent strategy guide, with optional Supabase cloud sync through Discord sign-in.
+A curated public strategy guide for **Age of Empires III: Definitive Edition**.
+Anyone can read civilization profiles and matchup guides. Only Discord users
+explicitly approved in Supabase can edit and publish content.
 
 ## Run locally
 
@@ -9,29 +11,62 @@ npm install
 npm run dev
 ```
 
-The app works without cloud credentials and saves guides in browser storage.
+Copy `.env.example` to `.env.local` and add the Supabase project URL and
+publishable/anon key. Without cloud credentials the bundled civilization
+reference content remains readable, but public guide editing is unavailable.
 
-## Civilization profile content
+## Set up Supabase
 
-Civilization details, booming videos, and deck presets are bundled in
-`src/data/civilizations.ts`. Add a YouTube video ID to `boomingVideoId` to
-enable the embedded player. Deck screenshots can be placed in `public/decks`
-and referenced from a deck preset with a path such as
-`/decks/british-boom.webp`.
+For a new project, run these files in order in the Supabase SQL Editor:
 
-Profiles use shareable routes such as `/civilizations/british`; matchup guides
-live beneath them at `/civilizations/british/matchups/french`.
+1. `supabase/migrations/202609210001_initial_schema.sql`
+2. `supabase/migrations/202609210002_public_guide_admins.sql`
 
-## Enable Supabase and Discord
+The second migration creates the public guide, admin allowlist, profile and
+deck fields, public deck-image Storage bucket, and row-level security policies.
+It preserves the original private guides as `personal_matchup_guides`.
 
-1. Create a Supabase project.
-2. Run the migration in `supabase/migrations/202609210001_initial_schema.sql` using the Supabase CLI or SQL editor.
-3. Copy `.env.example` to `.env.local` and add the project URL and anon key.
-4. In Supabase Authentication, enable the Discord provider and add its client ID and secret.
-5. Add `http://localhost:5173` and the production site URL to the Supabase redirect URL allow list.
-6. In the Discord developer portal, set the OAuth redirect URL to the callback URL shown by Supabase.
+Enable Discord in **Authentication → Providers** and add the Supabase callback
+URL to the Discord application. Add local and production app URLs to the
+Supabase redirect allow list.
 
-Row-level security limits every matchup guide to its owner. Civilization reference data is publicly readable and is seeded by the migration.
+## Grant admin access
+
+1. Have the intended admin use **Admin sign in** once so the user appears under
+   **Authentication → Users**.
+2. Copy that user's UUID.
+3. Run:
+
+```sql
+insert into public.guide_admins (user_id)
+values ('USER_UUID_FROM_AUTH_USERS');
+```
+
+The user can then sign out and back in, select **Edit guide**, and manage
+profiles, videos, shared matchups, decks, and screenshots. Signed-in users who
+are not in `guide_admins` remain read-only.
+
+To revoke access:
+
+```sql
+delete from public.guide_admins
+where user_id = 'USER_UUID_FROM_AUTH_USERS';
+```
+
+## Content model
+
+- `civilizations` stores public profile text, strengths, mechanics, and
+  YouTube video IDs.
+- `matchup_guides` stores one canonical directional guide per civilization
+  pairing.
+- `civilization_decks` stores ordered deck cards.
+- The public `deck-images` Storage bucket contains admin-uploaded screenshots.
+- `src/data/civilizations.ts` remains the offline fallback.
+
+Routes are shareable:
+
+- `/civilizations/british`
+- `/civilizations/british/matchups/french`
 
 ## Scripts
 
