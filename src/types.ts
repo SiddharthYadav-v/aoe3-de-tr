@@ -5,6 +5,22 @@ export type Region =
   | 'African'
   | 'Federal'
 
+export interface DeckPreset {
+  id: string
+  title: string
+  description: string
+  imagePath: string | null
+}
+
+export interface CivilizationProfile {
+  playstyle: string
+  economy: string
+  military: string
+  keyMechanics: string[]
+  boomingVideoId: string | null
+  decks: DeckPreset[]
+}
+
 export interface Civilization {
   id: string
   name: string
@@ -14,6 +30,7 @@ export interface Civilization {
   flagPath: string
   summary: string
   strengths: string[]
+  profile: CivilizationProfile
 }
 
 export interface MatchupGuide {

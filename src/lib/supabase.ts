@@ -63,16 +63,18 @@ export async function loadCivilizations(): Promise<Civilization[]> {
     .order('sort_order')
   if (error) throw error
 
-  return (data ?? []).map((row) => ({
-    id: row.id,
-    name: row.name,
-    shortName: row.short_name,
-    region: row.region as Civilization['region'],
-    accent: row.accent,
-    flagPath: civilizationById[row.id]?.flagPath ?? '',
-    summary: row.summary,
-    strengths: row.strengths,
-  }))
+  return (data ?? [])
+    .filter((row) => civilizationById[row.id])
+    .map((row) => ({
+      ...civilizationById[row.id],
+      id: row.id,
+      name: row.name,
+      shortName: row.short_name,
+      region: row.region as Civilization['region'],
+      accent: row.accent,
+      summary: row.summary,
+      strengths: row.strengths,
+    }))
 }
 
 export async function saveCloudGuide(guide: MatchupGuide) {

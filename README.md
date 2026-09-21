@@ -11,6 +11,17 @@ npm run dev
 
 The app works without cloud credentials and saves guides in browser storage.
 
+## Civilization profile content
+
+Civilization details, booming videos, and deck presets are bundled in
+`src/data/civilizations.ts`. Add a YouTube video ID to `boomingVideoId` to
+enable the embedded player. Deck screenshots can be placed in `public/decks`
+and referenced from a deck preset with a path such as
+`/decks/british-boom.webp`.
+
+Profiles use shareable routes such as `/civilizations/british`; matchup guides
+live beneath them at `/civilizations/british/matchups/french`.
+
 ## Enable Supabase and Discord
 
 1. Create a Supabase project.

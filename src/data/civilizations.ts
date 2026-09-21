@@ -27,7 +27,7 @@ const flagFiles: Record<string, string> = {
   swedish: 'Flag_SwedishDE.webp',
 }
 
-const civilizationSeed: Omit<Civilization, 'flagPath'>[] = [
+const civilizationSeed: Omit<Civilization, 'flagPath' | 'profile'>[] = [
   { id: 'american', name: 'United States', shortName: 'US', region: 'Federal', accent: '#315d91', summary: 'Flexible federal age-ups and shipment-driven tempo.', strengths: ['Federal states', 'Militia', 'Shipment tempo'] },
   { id: 'aztec', name: 'Aztec', shortName: 'AZ', region: 'Native American', accent: '#a94e34', summary: 'Explosive infantry pressure backed by warrior priests.', strengths: ['Infantry mass', 'Warrior dance', 'Early pressure'] },
   { id: 'british', name: 'British', shortName: 'BR', region: 'European', accent: '#9e3d36', summary: 'A manor-fueled economy supporting durable armies.', strengths: ['Manor boom', 'Longbows', 'Musketeers'] },
@@ -57,6 +57,36 @@ const civilizationSeed: Omit<Civilization, 'flagPath'>[] = [
 export const civilizations: Civilization[] = civilizationSeed.map((civilization) => ({
   ...civilization,
   flagPath: `/flags/${flagFiles[civilization.id]}?v=1`,
+  profile: {
+    playstyle: `${civilization.summary} Build the game plan around ${civilization.strengths
+      .slice(0, 2)
+      .join(' and ')
+      .toLowerCase()}, then adapt the final composition to the map and opponent.`,
+    economy: `${civilization.strengths[0]} is the economic anchor. Protect the infrastructure that enables it, keep villager production active, and spend each resource spike on a deliberate age-up, upgrade, or timing.`,
+    military: `${civilization.strengths.slice(1).join(' and ')} define the army's strongest shape. Scout before committing, preserve the expensive core, and transition before the opponent's counter mass is complete.`,
+    keyMechanics: civilization.strengths,
+    boomingVideoId: null,
+    decks: [
+      {
+        id: 'standard',
+        title: 'Standard supremacy',
+        description: 'A flexible one-versus-one deck for open maps and unknown opponents.',
+        imagePath: null,
+      },
+      {
+        id: 'boom',
+        title: 'Economic boom',
+        description: 'A greedier deck focused on scaling the civilization’s core economy.',
+        imagePath: null,
+      },
+      {
+        id: 'team',
+        title: 'Team game',
+        description: 'A team-oriented deck with stronger scaling and shared-map utility.',
+        imagePath: null,
+      },
+    ],
+  },
 }))
 
 export const civilizationById = Object.fromEntries(
